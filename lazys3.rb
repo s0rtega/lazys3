@@ -86,17 +86,12 @@ class Scanner
     @host = host
     @download = download
     @domain = domain
-    @POOL_SIZE = 50
+    @POOL_SIZE = 40
     @total = @list.length
   end
 
   def scan
-     data = get_page @host, @domain
-     doc = REXML::Document.new(data)
-     if data != ''
-       parse_results doc, @domain, @host, @download, 0
-       jobs = Queue.new
-     end
+     jobs = Queue.new
      @list.length.times{|i| jobs.push @list[i]}
      workers = (@POOL_SIZE).times.map do
      Thread.new do
@@ -108,7 +103,19 @@ class Scanner
 	     doc = REXML::Document.new(data)
              parse_results doc, url, @host, @download, 0
 	   end
+             fc = name[0]
+	     name[0] = ''
+             name = name+fc
+             url =  name+@domain
+             data = get_page @host, url
+           if data != ''
+             doc = REXML::Document.new(data)
+             parse_results doc, url, @host, @download, 0
+           end
          end
+       rescue => e
+	 puts "An error ocurred processing: "+name+@domain + " in: " +@host
+	 next
        end
       end
      end
@@ -122,6 +129,8 @@ class Wordlist
   PERMUTATIONS = %i(permutation_raw permutation_envs permutation_host)
 
   class << self
+
+    # creates de prefixes and sufixes list
     def generate(common_prefix, prefix_wordlist)
       [].tap do |list|
         PERMUTATIONS.each do |permutation|
@@ -138,6 +147,7 @@ class Wordlist
       common_prefix
     end
 
+    # creates the permutations related to the environments
     def permutation_envs(common_prefix, prefix_wordlist)
       [].tap do |permutations|
         prefix_wordlist.each do |word|
@@ -194,9 +204,14 @@ def get_page host, page
 			http.get("/" + page)
 		}
 	rescue Timeout::Error
-		puts "Timeout requesting page: " + url.host
-		@logging.puts "Timeout requesting page: " + url.host unless @logging.nil?
+		puts "Timeout requesting page: " + url.host + "/" + page + ". Retrying..."
+		if delay = retries.shift # will be nil if the list is empty
+                  sleep delay
+		  retry # backs up to just after the "begin"
+		else
+		@logging.puts "Timeout requesting page: " + url.host + "/" + page unless @logging.nil?
 		return ''
+		end
 	rescue => e
 		puts "Error requesting page: " + url.host + "/" + page + " " + e.to_s + ". Retrying..."
 		if delay = retries.shift # will be nil if the list is empty
